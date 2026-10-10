@@ -71,14 +71,14 @@ async def analyze_url(req: AnalyzeRequest):
             "formats": [{"format_id": "direct", "mode": "image", "ext": "jpg", "quality": "Original Image", "size_str": "Unknown Size"}]
         }
 
-    # YouTube Bot-Bypass Options
+    # YouTube Bot-Bypass Options (Aggressive Cloud Bypass)
     ydl_opts = {
         'extract_flat': False,
         'download': False,
         'quiet': True,
         'noplaylist': True,
         'extractor_args': {
-            'youtube': ['player_client=android,web'] # Tricks YT into thinking it's a mobile/web client
+            'youtube': ['player_client=android,ios,web'] 
         },
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -89,7 +89,12 @@ async def analyze_url(req: AnalyzeRequest):
         info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(url, download=False))
     except Exception as e:
         error_str = str(e).lower()
-        # 2. Fallback for Pinterest / Instagram / Blocked Sites
+        
+        # If YouTube blocks the Cloud Server, STOP here. Do not fallback to Image only.
+        if "youtube.com" in url or "youtu.be" in url:
+             raise HTTPException(400, "YouTube Security Block: Cloud server IP is blocked. Please run the backend locally (127.0.0.1) to download YouTube videos.")
+             
+        # Fallback for Pinterest / Instagram Images (Only runs if NOT YouTube)
         try:
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
             async with httpx.AsyncClient(follow_redirects=True, headers=headers) as client:
@@ -106,10 +111,7 @@ async def analyze_url(req: AnalyzeRequest):
                     }
         except Exception:
             pass
-        
-        # Make the error readable if YouTube totally blocks the Render IP
-        if "sign in" in error_str or "bot" in error_str or "blocked" in error_str:
-            raise HTTPException(400, "YouTube security blocked the cloud server. Please run the backend locally (127.0.0.1).")
+            
         raise HTTPException(status_code=400, detail=f"Analysis failed: {str(e)}")
 
     if not info: raise HTTPException(400, "Could not extract metadata.")
@@ -120,9 +122,7 @@ async def analyze_url(req: AnalyzeRequest):
         thumbnails_data = [
             {"label": "HD Image", "res": "(1280x720)", "url": f"https://i.ytimg.com/vi/{vid_id}/maxresdefault.jpg"},
             {"label": "SD Image", "res": "(640x480)", "url": f"https://i.ytimg.com/vi/{vid_id}/sddefault.jpg"},
-            {"label": "Normal Image", "res": "(480x360)", "url": f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg"},
-            {"label": "Normal Image", "res": "(320x180)", "url": f"https://i.ytimg.com/vi/{vid_id}/mqdefault.jpg"},
-            {"label": "Normal Image", "res": "(120x90)", "url": f"https://i.ytimg.com/vi/{vid_id}/default.jpg"}
+            {"label": "Normal Image", "res": "(480x360)", "url": f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg"}
         ]
     else:
         thumb_url = info.get("thumbnail")
@@ -193,7 +193,7 @@ async def stream_media(url: str, format_id: str, mode: str, output_format: str):
     filename = f"media_{uuid.uuid4().hex[:8]}.{output_format}"
     
     async def media_generator():
-        cmd = ['yt-dlp', '-o', '-', '-f', format_id, '--quiet', '--extractor-args', 'youtube:player_client=android,web']
+        cmd = ['yt-dlp', '-o', '-', '-f', format_id, '--quiet', '--extractor-args', 'youtube:player_client=android,ios,web']
         
         if mode == 'audio':
              cmd.extend(['--extract-audio', '--audio-format', output_format])
